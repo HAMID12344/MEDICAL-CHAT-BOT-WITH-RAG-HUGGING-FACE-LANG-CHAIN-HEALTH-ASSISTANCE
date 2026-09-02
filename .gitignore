@@ -1,0 +1,41 @@
+# Environment variables & API Keys (DO NOT PUSH TO GITHUB)
+.env
+.env.local
+.env.*.local
+
+# Python Virtual Environments
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Python Bytecode & Cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+.pytest_cache/
+
+# Large Vector Store Index & Cache (Generated at runtime)
+faiss_index/
+
+# Large Datasets / PDFs (Recommended to ignore if > 25MB on GitHub)
+data/*.pdf
+!data/.gitkeep
+
+# Hugging Face / Transformers Caches & Downloads
+.cache/
+hf_cache/
+
+# IDE & OS specific files
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Streamlit config / cache
+.streamlit/secrets.toml
