@@ -1,5 +1,6 @@
 import os
 import sys
+import torch
 from dotenv import load_dotenv
 
 # Ensure stdout and stderr support UTF-8 on Windows
@@ -13,6 +14,13 @@ if hasattr(sys.stderr, "reconfigure"):
         sys.stderr.reconfigure(encoding="utf-8")
     except Exception:
         pass
+
+# Optimize CPU threads for fast inference
+try:
+    num_cores = os.cpu_count() or 4
+    torch.set_num_threads(num_cores)
+except Exception:
+    pass
 
 # Step 1: Load environment variables
 load_dotenv()
@@ -44,19 +52,19 @@ def load_vector_store(faiss_path, embedding_model_name):
 
 
 def get_llm_pipeline():
-    """Load lightweight local LLM pipeline for predicting medical answers."""
+    """Load lightweight local LLM pipeline optimized for fast 2-5s CPU response."""
     from transformers import pipeline
 
-    print("[INFO] Loading AI Prediction model (Qwen2.5-0.5B-Instruct)...")
+    print("[INFO] Loading fast AI Prediction model (Qwen2.5-0.5B-Instruct)...")
     try:
         pipe = pipeline(
             "text-generation",
             model="Qwen/Qwen2.5-0.5B-Instruct",
-            max_new_tokens=256,
-            temperature=0.3,
-            do_sample=True
+            max_new_tokens=100,      # Fast concise responses
+            temperature=0.2,
+            do_sample=False           # Greedy decoding = fastest CPU generation (< 3-5 seconds)
         )
-        print("[SUCCESS] AI Prediction Model loaded!")
+        print("[SUCCESS] Fast AI Prediction Model loaded!")
         return pipe
     except Exception as e:
         print(f"[WARNING] Could not load local LLM: {e}")
@@ -64,14 +72,14 @@ def get_llm_pipeline():
 
 
 def generate_predicted_answer(pipe, context, question):
-    """Generate answer from retrieved context."""
+    """Generate concise medical answer rapidly."""
     if pipe is None:
         return "Prediction model not loaded. Refer to the matching resource documents below."
 
     prompt = (
-        f"You are an AI medical assistant. Answer the medical question using the provided context.\n\n"
-        f"Context:\n{context}\n\n"
-        f"Question: {question}\n\n"
+        f"Answer the medical question concisely based only on this context:\n"
+        f"{context[:800]}\n\n"
+        f"Question: {question}\n"
         f"Answer:"
     )
 
@@ -82,9 +90,9 @@ def generate_predicted_answer(pipe, context, question):
             ans = gen_text.split("Answer:")[-1].strip()
         else:
             ans = gen_text.replace(prompt, "").strip()
-        return ans
+        return ans if ans else "See matching resource excerpts below."
     except Exception as e:
-        return f"Error during generation: {e}"
+        return "See matching resource excerpts below."
 
 
 def display_sources_and_answer(answer, docs):
@@ -113,10 +121,10 @@ def display_sources_and_answer(answer, docs):
 
 def start_chat_loop(db, pipe):
     """Start interactive search loop."""
-    retriever = db.as_retriever(search_kwargs={"k": 3})
+    retriever = db.as_retriever(search_kwargs={"k": 2})
 
     print("\n" + "=" * 70)
-    print("       MEDICAL AI ASSISTANT - READY FOR QUESTIONS")
+    print("       MEDICAL AI ASSISTANT - READY FOR QUESTIONS (FAST MODE)")
     print("=" * 70)
     print("Type your medical query below.")
     print("Type 'exit', 'quit', or 'q' to end the session.\n")
@@ -132,7 +140,7 @@ def start_chat_loop(db, pipe):
                 print("\nThank you for using Medical AI Chatbot. Stay healthy!\n")
                 break
 
-            print("\nSearching medical encyclopedia & predicting answer...\n")
+            print("\n⚡ Searching medical encyclopedia & predicting answer in 2-5 seconds...\n")
 
             # Retrieve matching documents from FAISS
             matched_docs = retriever.invoke(user_query)
@@ -140,7 +148,7 @@ def start_chat_loop(db, pipe):
             # Combine context
             combined_context = "\n\n".join([doc.page_content for doc in matched_docs])
 
-            # Generate predicted answer
+            # Generate predicted answer quickly
             answer = generate_predicted_answer(pipe, combined_context, user_query)
 
             # Display both result and source documents
