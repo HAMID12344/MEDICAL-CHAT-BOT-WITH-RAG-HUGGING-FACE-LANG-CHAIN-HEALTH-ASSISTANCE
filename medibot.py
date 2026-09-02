@@ -146,7 +146,7 @@ st.markdown("""
         margin-top: 15px;
     }
 
-    /* Prompt Suggestion Chips */
+    /* Suggestion Chips */
     .suggestion-title {
         font-size: 0.85rem;
         font-weight: 600;
@@ -179,7 +179,6 @@ def load_llm_pipeline(model_name: str):
         return pipe
     except Exception as e:
         try:
-            # Fallback without device_map
             pipe = pipeline(
                 "text-generation",
                 model=model_name
@@ -190,41 +189,103 @@ def load_llm_pipeline(model_name: str):
             return None
 
 
-def generate_medical_answer(pipe, context, question, temperature: float, max_tokens: int):
-    """Generate concise medical answer based on selected hyperparameters."""
+def generate_medical_answer(pipe, context, question, temperature: float, max_tokens: int, strict_anti_hallucination: bool, rep_penalty: float):
+    """Generate medical answer with dynamic anti-hallucination guardrails."""
     if pipe is None:
         return "Please refer to the matching textbook resource documents below for details."
 
-    prompt = (
-        f"You are a certified clinical assistant. Answer the medical question directly and concisely based strictly on the provided textbook context.\n\n"
-        f"Context:\n{context[:1000]}\n\n"
-        f"Question: {question}\n\n"
-        f"Clinical Summary:"
-    )
+    if strict_anti_hallucination:
+        prompt = (
+            f"You are a strict clinical AI assistant. Follow these strict rules:\n"
+            f"1. Answer ONLY using the facts present in the Context.\n"
+            f"2. Do NOT extrapolate, speculate, or make up medical facts.\n"
+            f"3. If the context does not explicitly provide the answer, say: 'Based on the referenced medical encyclopedia, this information is not specified.'\n\n"
+            f"Context:\n{context[:1200]}\n\n"
+            f"Question: {question}\n\n"
+            f"Factual Clinical Summary:"
+        )
+    else:
+        prompt = (
+            f"You are a helpful medical assistant. Answer the question based on the provided context.\n\n"
+            f"Context:\n{context[:1000]}\n\n"
+            f"Question: {question}\n\n"
+            f"Clinical Summary:"
+        )
 
     try:
-        is_greedy = (temperature <= 0.05)
+        is_greedy = (temperature <= 0.02)
         output = pipe(
             prompt,
             max_new_tokens=max_tokens,
             temperature=max(temperature, 0.01),
+            repetition_penalty=rep_penalty,
             do_sample=not is_greedy
         )
         gen_text = output[0]["generated_text"]
-        if "Clinical Summary:" in gen_text:
-            answer = gen_text.split("Clinical Summary:")[-1].strip()
+        
+        split_marker = "Factual Clinical Summary:" if strict_anti_hallucination else "Clinical Summary:"
+        if split_marker in gen_text:
+            answer = gen_text.split(split_marker)[-1].strip()
         else:
             answer = gen_text.replace(prompt, "").strip()
+            
         return answer if answer else "Refer to the verified medical textbook excerpts below."
     except Exception as e:
         return "Refer to the verified medical textbook excerpts below."
 
 
-# 🌟 Sidebar: Model Selection, Temperature & Hyperparameters
+# 🌟 Sidebar Controls: Anti-Hallucination, Temperature & Models
 with st.sidebar:
-    st.markdown("### 🤖 LLM & Model Settings")
+    st.markdown("### 🛡️ Anti-Hallucination & Guardrails")
     
-    # 1. Model Selector
+    # Hallucination Guardrail Mode
+    guardrail_mode = st.radio(
+        "Grounding & Fact Strictness:",
+        options=["🔒 Strict Zero-Hallucination", "⚖️ Balanced Clinical", "💡 Flexible Synthesis"],
+        index=0,
+        help="Controls how strictly the AI adheres only to explicit PDF text vs creative synthesis."
+    )
+    
+    if guardrail_mode == "🔒 Strict Zero-Hallucination":
+        default_temp = 0.0
+        strict_flag = True
+        default_rep_penalty = 1.25
+        st.info("🎯 **Strict Mode**: Factual answers strictly verified against textbook text.")
+    elif guardrail_mode == "⚖️ Balanced Clinical":
+        default_temp = 0.2
+        strict_flag = False
+        default_rep_penalty = 1.10
+        st.info("⚖️ **Balanced Mode**: High factual grounding with smooth readability.")
+    else:
+        default_temp = 0.6
+        strict_flag = False
+        default_rep_penalty = 1.05
+        st.info("💡 **Flexible Mode**: Exploratory explanations.")
+
+    st.markdown("---")
+    st.markdown("### 🎛️ Fine-Tune Parameters")
+    
+    # 1. Temperature Slider
+    temperature = st.slider(
+        "🌡️ Temperature (Creativity vs Determinism):",
+        min_value=0.0,
+        max_value=1.0,
+        value=default_temp,
+        step=0.05,
+        help="0.0 = Deterministic facts (No hallucination). Higher = More creative."
+    )
+
+    # 2. Repetition & Hallucination Penalty Slider
+    rep_penalty = st.slider(
+        "🚫 Repetition / Hallucination Penalty:",
+        min_value=1.0,
+        max_value=1.5,
+        value=default_rep_penalty,
+        step=0.05,
+        help="Penalizes repetitive loops and discourages making up unrelated words."
+    )
+
+    # 3. Model Selector
     model_options = {
         "Qwen 2.5 (0.5B Instruct) — Fast Local": "Qwen/Qwen2.5-0.5B-Instruct",
         "TinyLlama (1.1B Chat) — Local": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
@@ -234,29 +295,17 @@ with st.sidebar:
     selected_model_label = st.selectbox(
         "🧠 Select Language Model (LLM):",
         options=list(model_options.keys()),
-        index=0,
-        help="Choose the neural network model used for medical reasoning and text synthesis."
+        index=0
     )
     selected_model_name = model_options[selected_model_label]
 
-    # 2. Temperature Slider
-    temperature = st.slider(
-        "🌡️ Temperature (Creativity vs Determinism):",
-        min_value=0.0,
-        max_value=1.0,
-        value=0.2,
-        step=0.05,
-        help="0.0 = Highly factual, deterministic, strict. Higher values (0.7+) = More creative and descriptive responses."
-    )
-
-    # 3. Max Response Tokens Slider
+    # 4. Max Response Tokens Slider
     max_tokens = st.slider(
         "📏 Max Response Length (Tokens):",
         min_value=50,
         max_value=300,
         value=140,
-        step=10,
-        help="Controls the maximum length of generated medical answers."
+        step=10
     )
 
     st.markdown("---")
@@ -291,6 +340,7 @@ with st.sidebar:
 
 
 # 🌟 Hero Header Section with Dynamic Parameters Display
+guard_badge = "🛡️ Zero-Hallucination" if strict_flag else "⚖️ Balanced"
 st.markdown(f"""
 <div class="hero-container">
     <div class="hero-title">
@@ -301,9 +351,10 @@ st.markdown(f"""
     </div>
     <div>
         <span class="badge-pill"><span class="badge-pulse"></span> RAG Online</span>
+        <span class="badge-pill">{guard_badge}</span>
         <span class="badge-pill">🧠 {selected_model_name.split('/')[-1]}</span>
         <span class="badge-pill">🌡️ Temp: {temperature:.2f}</span>
-        <span class="badge-pill">📏 Tokens: {max_tokens}</span>
+        <span class="badge-pill">🚫 Rep Penalty: {rep_penalty:.2f}</span>
         <span class="badge-pill">📚 k={top_k}</span>
     </div>
 </div>
@@ -374,7 +425,9 @@ if prompt_input:
 
                 combined_context = "\n\n".join([doc.page_content for doc in matched_docs])
                 pipe = load_llm_pipeline(selected_model_name)
-                predicted_answer = generate_medical_answer(pipe, combined_context, prompt_input, temperature, max_tokens)
+                predicted_answer = generate_medical_answer(
+                    pipe, combined_context, prompt_input, temperature, max_tokens, strict_flag, rep_penalty
+                )
 
                 # Render Answer
                 st.markdown(f"**Medical Summary:**\n\n{predicted_answer}")
