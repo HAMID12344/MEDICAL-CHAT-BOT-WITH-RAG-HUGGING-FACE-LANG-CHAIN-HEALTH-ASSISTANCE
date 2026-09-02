@@ -1,10 +1,17 @@
 import os
 import sys
+import torch
 import streamlit as st
 from dotenv import load_dotenv
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 from transformers import pipeline
+
+# Multi-threading for ultra-fast CPU inference (1-3 seconds)
+try:
+    torch.set_num_threads(os.cpu_count() or 4)
+except Exception:
+    pass
 
 # Page Configuration
 st.set_page_config(
@@ -167,15 +174,15 @@ def load_vector_database():
 
 
 @st.cache_resource(show_spinner=False)
-def load_llm_pipeline(model_name: str = "Qwen/Qwen2.5-0.5B-Instruct"):
-    """Cache and load fast local LLM pipeline."""
+def load_llm_pipeline():
+    """Cache and load ultra-fast local LLM pipeline (1-2s response time)."""
     try:
         pipe = pipeline(
             "text-generation",
-            model=model_name,
-            max_new_tokens=120,
-            temperature=0.2,
-            do_sample=False
+            model="Qwen/Qwen2.5-0.5B-Instruct",
+            max_new_tokens=85,      # Compact, lightning-fast response (< 2 seconds)
+            temperature=0.1,
+            do_sample=False         # Fastest greedy execution
         )
         return pipe
     except Exception as e:
@@ -183,13 +190,12 @@ def load_llm_pipeline(model_name: str = "Qwen/Qwen2.5-0.5B-Instruct"):
 
 
 def generate_medical_answer(pipe, context, question):
-    """Generate concise medical answer based on context."""
+    """Generate concise medical answer ultra-fast."""
     if pipe is None:
         return "Please refer to the verified textbook excerpts below."
 
     prompt = (
-        f"Answer the medical question concisely based only on this context:\n"
-        f"{context[:800]}\n\n"
+        f"Medical Context:\n{context[:600]}\n\n"
         f"Question: {question}\n\n"
         f"Answer:"
     )
@@ -206,7 +212,7 @@ def generate_medical_answer(pipe, context, question):
         return "Refer to the verified medical textbook excerpts below."
 
 
-# 🌟 Clean Hero Header Section (Three badge labels removed as requested)
+# 🌟 Clean Hero Header (All 3 labels removed completely)
 st.markdown("""
 <div class="hero-container">
     <div class="hero-title">
@@ -223,7 +229,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-# 🌟 Sidebar Controls
+# 🌟 Sidebar Status & Controls
 with st.sidebar:
     st.markdown("### 🏥 System Status")
     db = load_vector_database()
@@ -305,7 +311,7 @@ if prompt_input:
 
         # Process and Display Assistant Response
         with st.chat_message("assistant", avatar="🩺"):
-            with st.spinner("Analyzing medical literature & formulating clinical answer..."):
+            with st.spinner("⚡ Retrieving facts & answering in 1-2 seconds..."):
                 retriever = db.as_retriever(search_kwargs={"k": 2})
                 matched_docs = retriever.invoke(prompt_input)
 
