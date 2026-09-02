@@ -3,9 +3,6 @@ import sys
 import torch
 import streamlit as st
 from dotenv import load_dotenv
-from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_community.vectorstores import FAISS
-from transformers import pipeline
 
 # Multi-threading for ultra-fast CPU inference (1-3 seconds)
 try:
@@ -166,6 +163,9 @@ st.markdown("""
 @st.cache_resource(show_spinner=False)
 def load_vector_database():
     """Cache and load FAISS vector database."""
+    from langchain_huggingface import HuggingFaceEmbeddings
+    from langchain_community.vectorstores import FAISS
+
     if not os.path.exists(FAISS_PATH):
         return None
     embedding_model = HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL_NAME)
@@ -175,14 +175,15 @@ def load_vector_database():
 
 @st.cache_resource(show_spinner=False)
 def load_llm_pipeline():
-    """Cache and load ultra-fast local LLM pipeline (1-2s response time)."""
+    """Cache and load ultra-fast local LLM pipeline."""
     try:
+        from transformers.pipelines import pipeline
         pipe = pipeline(
             "text-generation",
             model="Qwen/Qwen2.5-0.5B-Instruct",
-            max_new_tokens=85,      # Compact, lightning-fast response (< 2 seconds)
+            max_new_tokens=85,
             temperature=0.1,
-            do_sample=False         # Fastest greedy execution
+            do_sample=False
         )
         return pipe
     except Exception as e:
@@ -212,7 +213,7 @@ def generate_medical_answer(pipe, context, question):
         return "Refer to the verified medical textbook excerpts below."
 
 
-# 🌟 Clean Hero Header (All 3 labels removed completely)
+# 🌟 Clean Hero Header
 st.markdown("""
 <div class="hero-container">
     <div class="hero-title">
