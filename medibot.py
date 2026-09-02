@@ -19,7 +19,7 @@ load_dotenv()
 FAISS_PATH = os.getenv("DB_FAISS_PATH", "faiss_index")
 EMBEDDING_MODEL_NAME = os.getenv("EMBEDDING_MODEL_NAME", "sentence-transformers/all-MiniLM-L6-v2")
 
-# Custom CSS for Premium Modern Healthcare Aesthetic
+# Custom CSS for Clean Healthcare Aesthetic
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600&display=swap');
@@ -38,8 +38,8 @@ st.markdown("""
         background: linear-gradient(135deg, rgba(14, 116, 144, 0.15) 0%, rgba(59, 130, 246, 0.08) 50%, rgba(16, 185, 129, 0.05) 100%);
         border: 1px solid rgba(14, 116, 144, 0.25);
         border-radius: 16px;
-        padding: 24px 28px;
-        margin-bottom: 25px;
+        padding: 22px 26px;
+        margin-bottom: 20px;
         box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.1);
         backdrop-filter: blur(8px);
     }
@@ -59,7 +59,7 @@ st.markdown("""
     .hero-subtitle {
         color: #94a3b8;
         font-size: 0.98rem;
-        margin-bottom: 12px;
+        margin-bottom: 8px;
         line-height: 1.5;
     }
 
@@ -75,7 +75,6 @@ st.markdown("""
         color: #38bdf8;
         border: 1px solid rgba(56, 189, 248, 0.3);
         margin-right: 8px;
-        margin-bottom: 4px;
     }
 
     .badge-pulse {
@@ -157,7 +156,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-@st.cache_resource(show_spinner="Connecting to medical knowledge base...")
+@st.cache_resource(show_spinner=False)
 def load_vector_database():
     """Cache and load FAISS vector database."""
     if not os.path.exists(FAISS_PATH):
@@ -167,166 +166,75 @@ def load_vector_database():
     return db
 
 
-@st.cache_resource(show_spinner="Loading AI model into memory...")
-def load_llm_pipeline(model_name: str):
-    """Cache and load LLM pipeline for selected model."""
+@st.cache_resource(show_spinner=False)
+def load_llm_pipeline(model_name: str = "Qwen/Qwen2.5-0.5B-Instruct"):
+    """Cache and load fast local LLM pipeline."""
     try:
         pipe = pipeline(
             "text-generation",
             model=model_name,
-            device_map="auto"
+            max_new_tokens=120,
+            temperature=0.2,
+            do_sample=False
         )
         return pipe
     except Exception as e:
-        try:
-            pipe = pipeline(
-                "text-generation",
-                model=model_name
-            )
-            return pipe
-        except Exception as e2:
-            st.warning(f"Could not load {model_name}: {e2}")
-            return None
+        return None
 
 
-def generate_medical_answer(pipe, context, question, temperature: float, max_tokens: int, strict_anti_hallucination: bool, rep_penalty: float):
-    """Generate medical answer with dynamic anti-hallucination guardrails."""
+def generate_medical_answer(pipe, context, question):
+    """Generate concise medical answer based on context."""
     if pipe is None:
-        return "Please refer to the matching textbook resource documents below for details."
+        return "Please refer to the verified textbook excerpts below."
 
-    if strict_anti_hallucination:
-        prompt = (
-            f"You are a strict clinical AI assistant. Follow these strict rules:\n"
-            f"1. Answer ONLY using the facts present in the Context.\n"
-            f"2. Do NOT extrapolate, speculate, or make up medical facts.\n"
-            f"3. If the context does not explicitly provide the answer, say: 'Based on the referenced medical encyclopedia, this information is not specified.'\n\n"
-            f"Context:\n{context[:1200]}\n\n"
-            f"Question: {question}\n\n"
-            f"Factual Clinical Summary:"
-        )
-    else:
-        prompt = (
-            f"You are a helpful medical assistant. Answer the question based on the provided context.\n\n"
-            f"Context:\n{context[:1000]}\n\n"
-            f"Question: {question}\n\n"
-            f"Clinical Summary:"
-        )
+    prompt = (
+        f"Answer the medical question concisely based only on this context:\n"
+        f"{context[:800]}\n\n"
+        f"Question: {question}\n\n"
+        f"Answer:"
+    )
 
     try:
-        is_greedy = (temperature <= 0.02)
-        output = pipe(
-            prompt,
-            max_new_tokens=max_tokens,
-            temperature=max(temperature, 0.01),
-            repetition_penalty=rep_penalty,
-            do_sample=not is_greedy
-        )
+        output = pipe(prompt)
         gen_text = output[0]["generated_text"]
-        
-        split_marker = "Factual Clinical Summary:" if strict_anti_hallucination else "Clinical Summary:"
-        if split_marker in gen_text:
-            answer = gen_text.split(split_marker)[-1].strip()
+        if "Answer:" in gen_text:
+            answer = gen_text.split("Answer:")[-1].strip()
         else:
             answer = gen_text.replace(prompt, "").strip()
-            
         return answer if answer else "Refer to the verified medical textbook excerpts below."
     except Exception as e:
         return "Refer to the verified medical textbook excerpts below."
 
 
-# 🌟 Sidebar Controls: Anti-Hallucination, Temperature & Models
+# 🌟 Clean Hero Header Section (Three badge labels removed as requested)
+st.markdown("""
+<div class="hero-container">
+    <div class="hero-title">
+        <span>🩺</span> MediAssist AI
+    </div>
+    <div class="hero-subtitle">
+        Clinical Reference & Question Answering System grounded in the <b>Gale Encyclopedia of Medicine</b>.
+    </div>
+    <div>
+        <span class="badge-pill"><span class="badge-pulse"></span> Vector RAG Online</span>
+        <span class="badge-pill">📚 Gale Encyclopedia 2nd Ed.</span>
+    </div>
+</div>
+""", unsafe_allow_html=True)
+
+
+# 🌟 Sidebar Controls
 with st.sidebar:
-    st.markdown("### 🛡️ Anti-Hallucination & Guardrails")
-    
-    # Hallucination Guardrail Mode
-    guardrail_mode = st.radio(
-        "Grounding & Fact Strictness:",
-        options=["🔒 Strict Zero-Hallucination", "⚖️ Balanced Clinical", "💡 Flexible Synthesis"],
-        index=0,
-        help="Controls how strictly the AI adheres only to explicit PDF text vs creative synthesis."
-    )
-    
-    if guardrail_mode == "🔒 Strict Zero-Hallucination":
-        default_temp = 0.0
-        strict_flag = True
-        default_rep_penalty = 1.25
-        st.info("🎯 **Strict Mode**: Factual answers strictly verified against textbook text.")
-    elif guardrail_mode == "⚖️ Balanced Clinical":
-        default_temp = 0.2
-        strict_flag = False
-        default_rep_penalty = 1.10
-        st.info("⚖️ **Balanced Mode**: High factual grounding with smooth readability.")
-    else:
-        default_temp = 0.6
-        strict_flag = False
-        default_rep_penalty = 1.05
-        st.info("💡 **Flexible Mode**: Exploratory explanations.")
-
-    st.markdown("---")
-    st.markdown("### 🎛️ Fine-Tune Parameters")
-    
-    # 1. Temperature Slider
-    temperature = st.slider(
-        "🌡️ Temperature (Creativity vs Determinism):",
-        min_value=0.0,
-        max_value=1.0,
-        value=default_temp,
-        step=0.05,
-        help="0.0 = Deterministic facts (No hallucination). Higher = More creative."
-    )
-
-    # 2. Repetition & Hallucination Penalty Slider
-    rep_penalty = st.slider(
-        "🚫 Repetition / Hallucination Penalty:",
-        min_value=1.0,
-        max_value=1.5,
-        value=default_rep_penalty,
-        step=0.05,
-        help="Penalizes repetitive loops and discourages making up unrelated words."
-    )
-
-    # 3. Model Selector
-    model_options = {
-        "Qwen 2.5 (0.5B Instruct) — Fast Local": "Qwen/Qwen2.5-0.5B-Instruct",
-        "TinyLlama (1.1B Chat) — Local": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
-        "GPT-2 (Base Medical Fallback)": "gpt2"
-    }
-    
-    selected_model_label = st.selectbox(
-        "🧠 Select Language Model (LLM):",
-        options=list(model_options.keys()),
-        index=0
-    )
-    selected_model_name = model_options[selected_model_label]
-
-    # 4. Max Response Tokens Slider
-    max_tokens = st.slider(
-        "📏 Max Response Length (Tokens):",
-        min_value=50,
-        max_value=300,
-        value=140,
-        step=10
-    )
-
-    st.markdown("---")
-    st.markdown("### 📚 Search & Citations")
-    top_k = st.slider(
-        "Citations per question (k):",
-        min_value=1,
-        max_value=5,
-        value=2,
-        help="Number of textbook excerpts to retrieve from the medical encyclopedia."
-    )
-
-    st.markdown("---")
+    st.markdown("### 🏥 System Status")
     db = load_vector_database()
     if db is not None:
-        st.success("🟢 **Knowledge Base Online**")
+        st.success("🟢 **Knowledge Base Active**")
         st.caption("Indexed: **Gale Encyclopedia of Medicine**")
     else:
         st.error("🔴 **Index Missing**")
         st.caption("Run `create_memory_llm.py` to index data.")
 
+    st.markdown("---")
     if st.button("🗑️ Clear Conversation", use_container_width=True):
         st.session_state.messages = []
         st.rerun()
@@ -337,28 +245,6 @@ with st.sidebar:
         For educational & research purposes only. Always consult a licensed physician for diagnosis and medical decisions.
     </div>
     """, unsafe_allow_html=True)
-
-
-# 🌟 Hero Header Section with Dynamic Parameters Display
-guard_badge = "🛡️ Zero-Hallucination" if strict_flag else "⚖️ Balanced"
-st.markdown(f"""
-<div class="hero-container">
-    <div class="hero-title">
-        <span>🩺</span> MediAssist AI
-    </div>
-    <div class="hero-subtitle">
-        Clinical Reference & Question Answering System grounded in the <b>Gale Encyclopedia of Medicine</b>.
-    </div>
-    <div>
-        <span class="badge-pill"><span class="badge-pulse"></span> RAG Online</span>
-        <span class="badge-pill">{guard_badge}</span>
-        <span class="badge-pill">🧠 {selected_model_name.split('/')[-1]}</span>
-        <span class="badge-pill">🌡️ Temp: {temperature:.2f}</span>
-        <span class="badge-pill">🚫 Rep Penalty: {rep_penalty:.2f}</span>
-        <span class="badge-pill">📚 k={top_k}</span>
-    </div>
-</div>
-""", unsafe_allow_html=True)
 
 
 # Initialize Chat History
@@ -420,14 +306,12 @@ if prompt_input:
         # Process and Display Assistant Response
         with st.chat_message("assistant", avatar="🩺"):
             with st.spinner("Analyzing medical literature & formulating clinical answer..."):
-                retriever = db.as_retriever(search_kwargs={"k": top_k})
+                retriever = db.as_retriever(search_kwargs={"k": 2})
                 matched_docs = retriever.invoke(prompt_input)
 
                 combined_context = "\n\n".join([doc.page_content for doc in matched_docs])
-                pipe = load_llm_pipeline(selected_model_name)
-                predicted_answer = generate_medical_answer(
-                    pipe, combined_context, prompt_input, temperature, max_tokens, strict_flag, rep_penalty
-                )
+                pipe = load_llm_pipeline()
+                predicted_answer = generate_medical_answer(pipe, combined_context, prompt_input)
 
                 # Render Answer
                 st.markdown(f"**Medical Summary:**\n\n{predicted_answer}")
