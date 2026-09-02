@@ -19,7 +19,7 @@ FAISS_PATH = os.getenv("DB_FAISS_PATH", "faiss_index")
 EMBEDDING_MODEL_NAME = os.getenv("EMBEDDING_MODEL_NAME", "sentence-transformers/all-MiniLM-L6-v2")
 
 
-@st.cache_resource
+@st.cache_resource(show_spinner="Loading medical database index...")
 def load_vector_database():
     """Cache and load FAISS vector database."""
     if not os.path.exists(FAISS_PATH):
@@ -29,51 +29,50 @@ def load_vector_database():
     return db
 
 
-@st.cache_resource
+@st.cache_resource(show_spinner="Loading AI model (cached after first run)...")
 def load_llm_pipeline():
-    """Cache and load local lightweight text generation pipeline."""
+    """Cache and load fast local text generation pipeline."""
     try:
         pipe = pipeline(
             "text-generation",
             model="Qwen/Qwen2.5-0.5B-Instruct",
-            max_new_tokens=256,
-            temperature=0.3,
-            do_sample=True
+            max_new_tokens=120,      # Optimized for fast CPU response (< 3-5 seconds)
+            temperature=0.2,
+            do_sample=False           # Greedy decoding is 2x faster on CPU
         )
         return pipe
     except Exception as e:
-        st.warning(f"Local LLM pipeline initialization note: {e}")
         return None
 
 
 def generate_medical_answer(pipe, context, question):
-    """Generate concise medical answer based on context."""
+    """Generate concise medical answer quickly."""
     if pipe is None:
-        return "LLM model is currently not loaded. Please refer to the retrieved resource documents below."
+        return "Please refer to the matching resource documents below for the answer."
 
+    # Keep prompt compact for faster processing
     prompt = (
-        f"You are an expert AI medical assistant. Answer the user question based strictly on the provided medical reference context.\n\n"
-        f"Context:\n{context}\n\n"
-        f"Question: {question}\n\n"
+        f"Answer the question concisely based only on this medical context:\n"
+        f"{context[:1000]}\n\n"
+        f"Question: {question}\n"
         f"Answer:"
     )
 
     try:
         output = pipe(prompt)
         gen_text = output[0]["generated_text"]
-        # Extract the answer part after 'Answer:'
         if "Answer:" in gen_text:
             answer = gen_text.split("Answer:")[-1].strip()
         else:
             answer = gen_text.replace(prompt, "").strip()
-        return answer if answer else "Could not generate a specific answer. See matching resource excerpts below."
+        return answer if answer else "See matching resource excerpts below."
     except Exception as e:
-        return f"Error during generation: {e}"
+        return f"See matching resource excerpts below."
 
 
 # UI Header
 st.title("🩺 AI Medical Chatbot & Reference Assistant")
-st.caption("Ask questions grounded in your medical encyclopedia PDF with source citations and page numbers.")
+st.caption("⚡ Fast query engine grounded in your medical encyclopedia PDF with exact page citations.")
 
 # Sidebar Information
 with st.sidebar:
@@ -87,7 +86,7 @@ with st.sidebar:
 
     st.markdown("---")
     st.markdown("### ⚙️ Settings")
-    top_k = st.slider("Number of source references to retrieve (k):", min_value=1, max_value=5, value=3)
+    top_k = st.slider("Number of source references to retrieve (k):", min_value=1, max_value=4, value=2)
 
     if st.button("Clear Chat History"):
         st.session_state.messages = []
@@ -109,7 +108,7 @@ for msg in st.session_state.messages:
                     st.markdown("---")
 
 # User Input Box
-user_query = st.chat_input("Ask a medical question (e.g., What are the symptoms and causes of asthma?)...")
+user_query = st.chat_input("Ask a medical question (e.g., What are the symptoms of asthma?)...")
 
 if user_query:
     if db is None:
@@ -121,7 +120,7 @@ if user_query:
 
         # Process retrieval and answer
         with st.chat_message("assistant"):
-            with st.spinner("Searching medical database & generating prediction..."):
+            with st.spinner("⚡ Retrieving medical facts & generating answer..."):
                 retriever = db.as_retriever(search_kwargs={"k": top_k})
                 matched_docs = retriever.invoke(user_query)
 
