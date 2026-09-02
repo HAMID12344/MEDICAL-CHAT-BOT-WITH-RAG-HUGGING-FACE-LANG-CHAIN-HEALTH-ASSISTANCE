@@ -71,8 +71,8 @@ def generate_medical_answer(pipe, context, question):
 
 
 # UI Header
-st.title("🩺 AI Medical Chatbot & Reference Assistant")
-st.caption("⚡ Fast query engine grounded in your medical encyclopedia PDF with exact page citations.")
+st.title("🩺 AI Medical Chatbot")
+st.caption("Ask any medical question grounded in your reference PDF documents.")
 
 # Sidebar Information
 with st.sidebar:
@@ -107,8 +107,8 @@ for msg in st.session_state.messages:
                     st.markdown(f"> {src['content']}")
                     st.markdown("---")
 
-# User Input Box
-user_query = st.chat_input("Ask a medical question (e.g., What are the symptoms of asthma?)...")
+# User Input Box (Clean placeholder without specific query tagline)
+user_query = st.chat_input("Ask a medical question...")
 
 if user_query:
     if db is None:
