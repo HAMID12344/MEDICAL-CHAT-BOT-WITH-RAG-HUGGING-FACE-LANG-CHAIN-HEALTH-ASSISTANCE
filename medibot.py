@@ -75,6 +75,7 @@ st.markdown("""
         color: #38bdf8;
         border: 1px solid rgba(56, 189, 248, 0.3);
         margin-right: 8px;
+        margin-bottom: 4px;
     }
 
     .badge-pulse {
@@ -166,24 +167,31 @@ def load_vector_database():
     return db
 
 
-@st.cache_resource(show_spinner="Initializing AI reasoning engine...")
-def load_llm_pipeline():
-    """Cache and load fast local text generation pipeline."""
+@st.cache_resource(show_spinner="Loading AI model into memory...")
+def load_llm_pipeline(model_name: str):
+    """Cache and load LLM pipeline for selected model."""
     try:
         pipe = pipeline(
             "text-generation",
-            model="Qwen/Qwen2.5-0.5B-Instruct",
-            max_new_tokens=140,
-            temperature=0.2,
-            do_sample=False
+            model=model_name,
+            device_map="auto"
         )
         return pipe
     except Exception as e:
-        return None
+        try:
+            # Fallback without device_map
+            pipe = pipeline(
+                "text-generation",
+                model=model_name
+            )
+            return pipe
+        except Exception as e2:
+            st.warning(f"Could not load {model_name}: {e2}")
+            return None
 
 
-def generate_medical_answer(pipe, context, question):
-    """Generate concise medical answer quickly."""
+def generate_medical_answer(pipe, context, question, temperature: float, max_tokens: int):
+    """Generate concise medical answer based on selected hyperparameters."""
     if pipe is None:
         return "Please refer to the matching textbook resource documents below for details."
 
@@ -195,7 +203,13 @@ def generate_medical_answer(pipe, context, question):
     )
 
     try:
-        output = pipe(prompt)
+        is_greedy = (temperature <= 0.05)
+        output = pipe(
+            prompt,
+            max_new_tokens=max_tokens,
+            temperature=max(temperature, 0.01),
+            do_sample=not is_greedy
+        )
         gen_text = output[0]["generated_text"]
         if "Clinical Summary:" in gen_text:
             answer = gen_text.split("Clinical Summary:")[-1].strip()
@@ -206,40 +220,64 @@ def generate_medical_answer(pipe, context, question):
         return "Refer to the verified medical textbook excerpts below."
 
 
-# 🌟 Hero Header Section
-st.markdown("""
-<div class="hero-container">
-    <div class="hero-title">
-        <span>🩺</span> MediAssist AI
-    </div>
-    <div class="hero-subtitle">
-        Clinical Reference & Question Answering System grounded in the <b>Gale Encyclopedia of Medicine</b>.
-    </div>
-    <div>
-        <span class="badge-pill"><span class="badge-pulse"></span> Vector RAG Active</span>
-        <span class="badge-pill">📚 Gale Encyclopedia 2nd Ed.</span>
-        <span class="badge-pill">⚡ Fast Local Inference</span>
-    </div>
-</div>
-""", unsafe_allow_html=True)
-
-
-# 🌟 Sidebar Controls & System Telemetry
+# 🌟 Sidebar: Model Selection, Temperature & Hyperparameters
 with st.sidebar:
-    st.markdown("### 🏥 System Telemetry")
+    st.markdown("### 🤖 LLM & Model Settings")
+    
+    # 1. Model Selector
+    model_options = {
+        "Qwen 2.5 (0.5B Instruct) — Fast Local": "Qwen/Qwen2.5-0.5B-Instruct",
+        "TinyLlama (1.1B Chat) — Local": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+        "GPT-2 (Base Medical Fallback)": "gpt2"
+    }
+    
+    selected_model_label = st.selectbox(
+        "🧠 Select Language Model (LLM):",
+        options=list(model_options.keys()),
+        index=0,
+        help="Choose the neural network model used for medical reasoning and text synthesis."
+    )
+    selected_model_name = model_options[selected_model_label]
+
+    # 2. Temperature Slider
+    temperature = st.slider(
+        "🌡️ Temperature (Creativity vs Determinism):",
+        min_value=0.0,
+        max_value=1.0,
+        value=0.2,
+        step=0.05,
+        help="0.0 = Highly factual, deterministic, strict. Higher values (0.7+) = More creative and descriptive responses."
+    )
+
+    # 3. Max Response Tokens Slider
+    max_tokens = st.slider(
+        "📏 Max Response Length (Tokens):",
+        min_value=50,
+        max_value=300,
+        value=140,
+        step=10,
+        help="Controls the maximum length of generated medical answers."
+    )
+
+    st.markdown("---")
+    st.markdown("### 📚 Search & Citations")
+    top_k = st.slider(
+        "Citations per question (k):",
+        min_value=1,
+        max_value=5,
+        value=2,
+        help="Number of textbook excerpts to retrieve from the medical encyclopedia."
+    )
+
+    st.markdown("---")
     db = load_vector_database()
     if db is not None:
         st.success("🟢 **Knowledge Base Online**")
-        st.caption("Indexed: **The Gale Encyclopedia of Medicine**")
+        st.caption("Indexed: **Gale Encyclopedia of Medicine**")
     else:
         st.error("🔴 **Index Missing**")
         st.caption("Run `create_memory_llm.py` to index data.")
 
-    st.markdown("---")
-    st.markdown("### ⚙️ Search Configuration")
-    top_k = st.slider("Citations per question (k):", min_value=1, max_value=4, value=2, help="Number of textbook excerpts to retrieve.")
-
-    st.markdown("---")
     if st.button("🗑️ Clear Conversation", use_container_width=True):
         st.session_state.messages = []
         st.rerun()
@@ -250,6 +288,26 @@ with st.sidebar:
         For educational & research purposes only. Always consult a licensed physician for diagnosis and medical decisions.
     </div>
     """, unsafe_allow_html=True)
+
+
+# 🌟 Hero Header Section with Dynamic Parameters Display
+st.markdown(f"""
+<div class="hero-container">
+    <div class="hero-title">
+        <span>🩺</span> MediAssist AI
+    </div>
+    <div class="hero-subtitle">
+        Clinical Reference & Question Answering System grounded in the <b>Gale Encyclopedia of Medicine</b>.
+    </div>
+    <div>
+        <span class="badge-pill"><span class="badge-pulse"></span> RAG Online</span>
+        <span class="badge-pill">🧠 {selected_model_name.split('/')[-1]}</span>
+        <span class="badge-pill">🌡️ Temp: {temperature:.2f}</span>
+        <span class="badge-pill">📏 Tokens: {max_tokens}</span>
+        <span class="badge-pill">📚 k={top_k}</span>
+    </div>
+</div>
+""", unsafe_allow_html=True)
 
 
 # Initialize Chat History
@@ -315,8 +373,8 @@ if prompt_input:
                 matched_docs = retriever.invoke(prompt_input)
 
                 combined_context = "\n\n".join([doc.page_content for doc in matched_docs])
-                pipe = load_llm_pipeline()
-                predicted_answer = generate_medical_answer(pipe, combined_context, prompt_input)
+                pipe = load_llm_pipeline(selected_model_name)
+                predicted_answer = generate_medical_answer(pipe, combined_context, prompt_input, temperature, max_tokens)
 
                 # Render Answer
                 st.markdown(f"**Medical Summary:**\n\n{predicted_answer}")
